@@ -1,32 +1,18 @@
 from flask import Flask, request, jsonify
-import time
-import hmac
-import hashlib
-import base64
 import requests
 import os
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# 환경변수
-NAVER_API_KEY = os.environ.get("NAVER_API_KEY", "")
-NAVER_SECRET_KEY = os.environ.get("NAVER_SECRET_KEY", "")
-NAVER_CUSTOMER_ID = os.environ.get("NAVER_CUSTOMER_ID", "")
-
-def generate_signature(timestamp, method, uri):
-    message = f"{timestamp}.{method}.{uri}"
-    signature = hmac.new(
-        NAVER_SECRET_KEY.encode('utf-8'),
-        message.encode('utf-8'),
-        hashlib.sha256
-    ).digest()
-    return base64.b64encode(signature).decode('utf-8')
+CLIENT_ID = os.environ.get("CLIENT_ID", "")
+CLIENT_SECRET = os.environ.get("CLIENT_SECRET", "")
 
 @app.route('/')
 def home():
     return jsonify({
-        "status": "ok", 
-        "message": "Naver Keyword API",
+        "status": "ok",
+        "message": "Naver DataLab Shopping Insight API",
         "endpoints": ["/api/analyze"]
     })
 
@@ -44,93 +30,90 @@ def analyze():
     if not keywords:
         return jsonify({"status": "error", "message": "No keywords"}), 400
     
-    if not all([NAVER_API_KEY, NAVER_SECRET_KEY, NAVER_CUSTOMER_ID]):
+    if not all([CLIENT_ID, CLIENT_SECRET]):
         return jsonify({"status": "error", "message": "API keys missing"}), 500
     
-    base_url = "https://api.naver.com"
-    uri = "/keywordstool"
+    # 최근 3개월 날짜 설정
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=90)
+    
+    # 데이터랩 API 요청 URL
+    url = "https://openapi.naver.com/v1/datalab/shopping/categories"
+    
+    headers = {
+        "X-Naver-Client-Id": CLIENT_ID,
+        "X-Naver-Client-Secret": CLIENT_SECRET,
+        "Content-Type": "application/json"
+    }
+    
     results = []
     
-    for i in range(0, len(keywords), 5):
-        batch = keywords[i:i+5]
-        timestamp = str(int(time.time() * 1000))
-        
-        headers = {
-            "Content-Type": "application/json; charset=UTF-8",
-            "X-Timestamp": timestamp,
-            "X-API-KEY": NAVER_API_KEY,
-            "X-Customer": NAVER_CUSTOMER_ID,
-            "X-Signature": generate_signature(timestamp, "GET", uri)
+    # 각 키워드별로 처리
+    for keyword in keywords[:5]:  # 최대 5개까지
+        body = {
+            "startDate": start_date.strftime("%Y-%m-%d"),
+            "endDate": end_date.strftime("%Y-%m-%d"),
+            "timeUnit": "month",
+            "category": [
+                {
+                    "name": keyword,
+                    "param": ["50000000"]  # 전체 카테고리
+                }
+            ],
+            "device": "pc",
+            "ages": ["20", "30", "40"],
+            "gender": "f"
         }
         
         try:
-            hint_keywords = ",".join([k.strip().replace(" ", "") for k in batch])
-            res = requests.get(
-                base_url + uri,
-                headers=headers,
-                params={"hintKeywords": hint_keywords, "showDetail": "1"}
-            )
+            res = requests.post(url, headers=headers, json=body)
             
             if res.status_code == 200:
-                for item in res.json().get("keywordList", []):
-                    if item["relKeyword"].replace(" ", "") in [k.replace(" ", "") for k in batch]:
-                        pc = int(str(item.get("monthlyPcQcCnt", "0")).replace("<", ""))
-                        mo = int(str(item.get("monthlyMobileQcCnt", "0")).replace("<", ""))
+                data = res.json()
+                if data.get("results") and len(data["results"]) > 0:
+                    # 최근 데이터의 검색 비율
+                    ratio_data = data["results"][0].get("data", [])
+                    if ratio_data:
+                        latest = ratio_data[-1]  # 가장 최근 데이터
+                        ratio = latest.get("ratio", 0)
                         results.append([
-                            item["relKeyword"],
-                            pc,
-                            mo,
-                            pc + mo,
-                            item.get("compIdx", "N/A")
+                            keyword,
+                            ratio,
+                            "쇼핑 검색 비율",
+                            latest.get("period", "")
                         ])
+            else:
+                print(f"API Error {res.status_code}: {res.text}")
+                
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Exception: {str(e)}")
     
-    results.sort(key=lambda x: x[3], reverse=True)
+    # 비율 기준 내림차순 정렬
+    results.sort(key=lambda x: x[1], reverse=True)
+    
     return jsonify({"status": "success", "data": results})
+
+handler = app
 ```
 
 **Commit changes** 클릭!
 
 ---
 
-### 3️⃣ Vercel에 새로 배포
+### 2️⃣ Vercel 환경변수 설정
 
-1. [vercel.com/dashboard](https://vercel.com/dashboard) 접속
-2. **Add New** → **Project**
-3. **Import Git Repository** → `naver-api` 선택
-4. **그냥 Deploy 클릭!** (설정 건드리지 마세요)
+Vercel 대시보드:
+1. **Settings** → **Environment Variables**
+2. 다음 2개 추가:
 
-배포 진행 중 화면이 보일 겁니다. **초록색 체크 표시** 뜰 때까지 기다리세요 (1~2분).
-
----
-
-### 4️⃣ 환경변수 설정
-
-배포 완료 후:
-
-1. 프로젝트 클릭 → **Settings** 탭
-2. 왼쪽 메뉴 → **Environment Variables**
-3. 다음 3개 추가:
-
-| Name | Value |
-|------|-------|
-| `NAVER_API_KEY` | 실제 API 키 |
-| `NAVER_SECRET_KEY` | 실제 Secret 키 |
-| `NAVER_CUSTOMER_ID` | 실제 고객 ID |
-
-4. **Save** 클릭
-5. **Deployments** 탭 → 최신 배포 옆 **⋯** → **Redeploy**
-
----
-
-### 5️⃣ 테스트
-
-배포된 URL (예: `https://naver-api-xxx.vercel.app`) 복사 후:
-
-**브라우저에서:**
+#### 첫 번째 변수
 ```
-https://naver-api-xxx.vercel.app/
+Key: CLIENT_ID
+Value: eX9u6nzuYFHGo86cUuya
+```
+**Save** 클릭!
 
-# Vercel serverless function handler
-handler = app
+#### 두 번째 변수
+```
+Key: CLIENT_SECRET  
+Value: (네이버 개발자센터에서 "보기" 버튼 눌러서 복사)
