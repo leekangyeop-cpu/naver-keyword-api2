@@ -131,3 +131,6 @@ def analyze():
 **브라우저에서:**
 ```
 https://naver-api-xxx.vercel.app/
+
+# Vercel serverless function handler
+handler = app
