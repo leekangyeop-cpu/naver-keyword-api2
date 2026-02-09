@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify
 import requests
 import os
-from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -12,7 +11,7 @@ CLIENT_SECRET = os.environ.get("CLIENT_SECRET", "")
 def home():
     return jsonify({
         "status": "ok",
-        "message": "Naver DataLab Shopping Insight API",
+        "message": "Naver Blog Search API",
         "endpoints": ["/api/analyze"]
     })
 
@@ -24,71 +23,59 @@ def analyze():
     try:
         data = request.get_json()
         keywords = data.get("keywords", [])
-    except:
-        return jsonify({"status": "error", "message": "Invalid JSON"}), 400
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Invalid JSON: {str(e)}"}), 400
     
     if not keywords:
-        return jsonify({"status": "error", "message": "No keywords"}), 400
+        return jsonify({"status": "error", "message": "No keywords provided"}), 400
     
-    if not all([CLIENT_ID, CLIENT_SECRET]):
-        return jsonify({"status": "error", "message": "API keys missing"}), 500
-    
-    # 최근 3개월 날짜 설정
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=90)
-    
-    # 데이터랩 API 요청 URL
-    url = "https://openapi.naver.com/v1/datalab/shopping/categories"
-    
-    headers = {
-        "X-Naver-Client-Id": CLIENT_ID,
-        "X-Naver-Client-Secret": CLIENT_SECRET,
-        "Content-Type": "application/json"
-    }
+    if not CLIENT_ID or not CLIENT_SECRET:
+        return jsonify({
+            "status": "error", 
+            "message": "API keys not configured",
+            "client_id_exists": bool(CLIENT_ID),
+            "client_secret_exists": bool(CLIENT_SECRET)
+        }), 500
     
     results = []
     
-    # 각 키워드별로 처리
-    for keyword in keywords[:5]:  # 최대 5개까지
-        body = {
-            "startDate": start_date.strftime("%Y-%m-%d"),
-            "endDate": end_date.strftime("%Y-%m-%d"),
-            "timeUnit": "month",
-            "category": [
-                {
-                    "name": keyword,
-                    "param": ["50000000"]  # 전체 카테고리
-                }
-            ],
-            "device": "pc",
-            "ages": ["20", "30", "40"],
-            "gender": "f"
-        }
-        
+    for keyword in keywords[:10]:
         try:
-            res = requests.post(url, headers=headers, json=body)
+            headers = {
+                "X-Naver-Client-Id": CLIENT_ID,
+                "X-Naver-Client-Secret": CLIENT_SECRET
+            }
             
-            if res.status_code == 200:
-                data = res.json()
-                if data.get("results") and len(data["results"]) > 0:
-                    # 최근 데이터의 검색 비율
-                    ratio_data = data["results"][0].get("data", [])
-                    if ratio_data:
-                        latest = ratio_data[-1]  # 가장 최근 데이터
-                        ratio = latest.get("ratio", 0)
-                        results.append([
-                            keyword,
-                            ratio,
-                            "쇼핑 검색 비율",
-                            latest.get("period", "")
-                        ])
+            # 블로그 검색 API (간단하고 안정적)
+            response = requests.get(
+                "https://openapi.naver.com/v1/search/blog.json",
+                headers=headers,
+                params={"query": keyword, "display": 1},
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                total = result.get("total", 0)
+                results.append([
+                    keyword,
+                    total,
+                    "블로그 검색수"
+                ])
             else:
-                print(f"API Error {res.status_code}: {res.text}")
+                results.append([
+                    keyword,
+                    0,
+                    f"오류 {response.status_code}"
+                ])
                 
         except Exception as e:
-            print(f"Exception: {str(e)}")
+            results.append([
+                keyword,
+                0,
+                f"에러: {str(e)[:20]}"
+            ])
     
-    # 비율 기준 내림차순 정렬
     results.sort(key=lambda x: x[1], reverse=True)
     
     return jsonify({"status": "success", "data": results})
@@ -96,24 +83,12 @@ def analyze():
 handler = app
 ```
 
-**Commit changes** 클릭!
+**Commit changes**
 
 ---
 
-### 2️⃣ Vercel 환경변수 설정
+## 🧪 테스트
 
-Vercel 대시보드:
-1. **Settings** → **Environment Variables**
-2. 다음 2개 추가:
-
-#### 첫 번째 변수
+### 브라우저에서 직접 테스트
 ```
-Key: CLIENT_ID
-Value: eX9u6nzuYFHGo86cUuya
-```
-**Save** 클릭!
-
-#### 두 번째 변수
-```
-Key: CLIENT_SECRET  
-Value: (네이버 개발자센터에서 "보기" 버튼 눌러서 복사)
+https://naver-keyword-api2.vercel.app/
